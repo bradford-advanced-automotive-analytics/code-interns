@@ -1,4 +1,10 @@
 # -*- coding: utf-8 -*-
+
+"""
+Code for battery data.
+@author Squillaci Samuel
+"""
+
 # My libs
 import libs.data_manager.data_manager as dm
 import libs.data_manager.model as mod
@@ -12,9 +18,11 @@ from mpl_toolkits.mplot3d import Axes3D
 import matplotlib.pyplot as plt
 from  sklearn .manifold import TSNE 
 import seaborn as sns
+import matplotlib.colors
 # data libs
 import pandas as pd
 import numpy as np
+from sklearn.cluster import KMeans
 from sklearn.preprocessing import KBinsDiscretizer
 # other
 from bson import json_util
@@ -22,6 +30,7 @@ import pickle as pk
 from time import time
 from copy import deepcopy
 from functools import reduce
+from random import shuffle
 
 def saveObject(obj,filename):
     outfile = open(filename,'wb')
@@ -73,6 +82,69 @@ nan_counts0 = d0.dataset.isna().sum() # pas de NaN, ca c'est que du bonheur <3
 # see plot in the vizu folder as pairplot.png
 #sns.pairplot(d0.dataset)
 
+
+v0_analyticVin = v0['messageheader_analyticvin']/sum(v0['messageheader_analyticvin']) 
+plt.figure(figsize=(20,5))
+plt.ylabel("proportion of total messages received by vins")
+plt.xticks(rotation='vertical')
+plt.xlabel("VIN")
+plt.bar(v0_analyticVin.index.values,v0_analyticVin.values)
+# we need to cluster vins
+
+dictClusters = {}
+kmeans = KMeans(n_clusters=3, random_state=0).fit(np.array(np.transpose([v0_analyticVin.values])))
+lab = kmeans.labels_
+clusters = (lab==0,lab==1,lab==2)
+for ind,el in enumerate(v0_analyticVin.index.values):
+    dictClusters[el] = lab[ind]
+fig,ax = plt.subplots(figsize=(20,5))
+plt.xticks(rotation='vertical')
+ax.bar(np.array(v0_analyticVin.index.values)[clusters[0]],(np.array(v0_analyticVin.values))[clusters[0]],color="b")
+ax.bar(np.array(v0_analyticVin.index.values)[clusters[1]],(np.array(v0_analyticVin.values))[clusters[1]],color="r")
+ax.bar(np.array(v0_analyticVin.index.values)[clusters[2]],(np.array(v0_analyticVin.values))[clusters[2]],color="k")
+plt.legend(["cluster 0","cluster 1","cluster 2"],loc="upper right")
+plt.ylabel("proportion of messages received")
+plt.show()
+
+
+data=d0.dataset[["messageheader_encryptedvin","messageheader_analyticvin"]]
+vin_groups = data.groupby(by=["messageheader_encryptedvin","messageheader_analyticvin"])
+size = vin_groups.size()/data.shape[0]
+keys = list(vin_groups.groups.keys())
+keys = pd.Series([dictClusters[x[1]] for x in keys])
+
+   
+perm = np.random.permutation(size.index)
+keys.reindex(perm)
+size = size.reindex(perm)# shuffle once and for all
+
+n_sample = 100 # n vehicles
+x=[x[0] for x in size.index.values][:int(n_sample)]
+y=size.iloc[:int(n_sample)]
+z=keys.iloc[:int(n_sample)]
+
+c0Idx = z==0
+c1Idx = z==1
+c2Idx = z==2
+plt.figure(figsize=(20,7))
+plt.title("vehicles messages : "+str(n_sample)+" vehicles")
+plt.xticks(rotation="vertical")
+plt.bar(np.array(x)[c0Idx],np.array(y)[c0Idx],color="g")
+plt.bar(np.array(x)[c1Idx],np.array(y)[c1Idx],color="r")
+plt.bar(np.array(x)[c2Idx],np.array(y)[c2Idx],color="k")
+plt.legend(("cluster0","cluster1","cluster2"))
+plt.show()
+
+descr = (pd.Series(np.array(y)[c0Idx]).describe(),
+         pd.Series(np.array(y)[c1Idx]).describe(),
+         pd.Series(np.array(y)[c2Idx]).describe())
+
+ax = sns.boxplot(x="clusters",
+                 y="count",
+                 data=pd.DataFrame({"clusters":z.values,
+                                    "count":y.values}))
+
+    
 #=========================[Battery 1 ]=========================================
 
 battery_path1 = "data/batteries_01.csv"
@@ -113,8 +185,40 @@ for c in d2.dataset.columns:
     v2[c] = d2.dataset[c].value_counts()
 sh2 = d2.dataset.shape
 nan_counts2 = d2.dataset.isna().sum() # 90% events NaN
-# not working
-#sns.pairplot(d2.dataset)
+
+""" some of the columns must be floats in order to automatise function in my lib """
+repairIntToFloat = ['other_odometermastervalue','other_ambienttempx100',
+                    'other_recordedtime_seconds','other_vehiclespeedx100',
+                    'batterycellmeasurements_hvbattcellvoltageminx1000',
+                    'batterycellmeasurements_hvbattcelltempcoolestx10',
+                    'batterycellmeasurements_hvbattcurrentextx1000',
+                    'batterycellmeasurements_hvbattcellvoltagemaxx1000',
+                    'batterycellmeasurements_hvbattvoltageext',
+                    'batterycellmeasurements_hvbattcelltemphottestx10',
+                    'bmselectricalmodulemonitoring_hvbattfusetemperature',
+                    'bmselectricalmodulemonitoring_hvbattmemtemperature',
+                    'thermalmanagement_hvbattinletcoolanttemp',
+                    'thermalmanagement_hvbattcoolingenergyusdx100',
+                    'thermalmanagement_hvbattoutletcoolanttemp',
+                    'batteryhealthmonitoring_hvbattstateofhealthpwrx10',
+                    'batteryhealthmonitoring_hvbattfastchgcounter',
+                    'batteryhealthmonitoring_hvbatstateofhealthminx10',
+                    'batteryhealthmonitoring_hvbatstateofhealthx10',
+                    'batteryhealthmonitoring_hvbatstateofhealthmaxx10',
+                    ]
+d2.dataset[repairIntToFloat].dtypes
+d2.dataset[repairIntToFloat] = d2.dataset[repairIntToFloat].astype("float64")
+
+d2.setInfos() # load informations again based on the repaired types
+d2.typesSummary() # infer data types : dict in the 0 index
+""" it automatically separate categorical and continuous 
+(there is a typing error in data nature variables)
+"""
+d2.dataTypes # local variables which store variable natures, never change it manually
+
+
+
+
 
 #==============================================================================
 
@@ -213,6 +317,7 @@ for col in interestingColumns:
                      data=d2.dataset[cols].sample(frac=0.01), linewidth=2.5)
     
 #===============================[Profile mining]===============================
+#_______________________________VERSION 1______________________________________
 colsId = []
 for col in list(d2.dataset.columns.values):
     if(col[-2:]=="id"):
@@ -225,7 +330,7 @@ d2.select(colsId+modesAndStatus+statuscat) # part of my lib : refresh informatio
 d2.dataset.columns
 
 # since it is still to huge in terms of combination of values, we need to del some id
-keepIdCol = ["cellbalancing_hvbattblncngtrgcellid"]
+keepIdCol = ["batterycellmeasurements_hvbattcelltempcoldcellid","batterycellmeasurements_hvbattvoltmaxcellid"]
 d2.delColumns([x for x in colsId if not x in keepIdCol])
 d2.dataset.columns
 
@@ -250,6 +355,7 @@ sizes_count = countProfiles.value_counts()
 # although it is questionnable we will try to merge some profiles with a Kmeans.
 # We need to find a metric. For a profile we assign the frequency column of the 3 status
 
+#_______________________________VERSION 2______________________________________
 
 # Let's load the original data again
 battery_path2 = "data/batteries_02.csv"
@@ -259,13 +365,16 @@ print(d2.dataset.columns)
 
 d2.select(colsId+modesAndStatus+statuscat)
 print(d2.dataset.columns)
+
+
+#---------------------------MEASURE EXAMPLE------------------------------------
 # we need now to merge nodes at each level before creating another level
 """ 
 colsValues > profile = [id:[id1,id4],mode:[mode1,mode2]]...
 isReduced : do the dataset contain only rows matching with the profile?
 return [freq(4derate),freq(6dlybpo),freq(7nowbpo)]
 """
-def mergeMetric(colsValues,dataset,isReduced=False):
+def metric(colsValues,dataset,isReduced=False):
     if(not isReduced):
         statuscat = ['batteryfaultmonitoring_hvbatstatucat4derate',
            'batteryfaultmonitoring_hvbatstatuscat6dlybpo',
@@ -281,54 +390,43 @@ def mergeMetric(colsValues,dataset,isReduced=False):
                      dselect['batteryfaultmonitoring_hvbatstatuscat6dlybpo'].sum()/length,
                      dselect['batteryfaultmonitoring_hvbatstatuscat7nowbpo'].sum()/length])
     
-    
-def metric(colsValues,dataset,isReduced=False):
-    if(not isReduced):
-        statuscat = ['batteryfaultmonitoring_hvbatstatucat4derate',
-           'batteryfaultmonitoring_hvbatstatuscat6dlybpo',
-           'batteryfaultmonitoring_hvbatstatuscat7nowbpo']
-        dselect = dataset[list(colsValues.keys())+statuscat]
-        # for each key check if the value is in the list, then multiply the booleans
-        match = lambda r : bool(reduce((lambda x, y: x * y), [r[key]==value for key,value in colsValues.items()]))
-        dselect = dselect[ dselect.apply(match, axis=1) ]
-    else :
-        dselect = dataset
-    length = dselect.shape[0]
-    return np.array([dselect['batteryfaultmonitoring_hvbatstatucat4derate'].sum()/length,
-                     dselect['batteryfaultmonitoring_hvbatstatuscat6dlybpo'].sum()/length,
-                     dselect['batteryfaultmonitoring_hvbatstatuscat7nowbpo'].sum()/length])
 """ test : this is what we wan t to achieve """
-mergeProfileValues = {'cellbalancing_hvbattbalancingstatus': ['noBalancing','initialValue'],
+mergedProfileValues = {'cellbalancing_hvbattbalancingstatus': ['noBalancing','initialValue'],
  'thermalmanagement_hvbattthrmlmngrmode': ['idle'],
  'other_powermode': ['accessory1','running'],
  'cellbalancing_hvbattblncngtrgcellid': [0,11]}
 # array([0., 0.0106383, 0.]) very long time execution : 
 # dataset will be reduced in the tree building at each step
-mergeMetric(mergeProfileValues,d2.dataset,isReduced=False)
+metric(mergedProfileValues,d2.dataset,isReduced=False)
 # obviously it is wrong to set isReduced here, but this give an idea about the speed
-mergeMetric(mergeProfileValues,d2.dataset,isReduced=True)
+metric(mergedProfileValues,d2.dataset,isReduced=True)
+
+
+#---------------------------MEASURE DEFINITION---------------------------------
 
 import libs.data_manager.profile_metric as pm2
-""" let's consider an object measuring the reduced dataframe """
-
-
+""" let's consider an object measuring the reduced dataframe. we use the
+frequency of each code.
+"""
 class frequencyMetric(pm2.Metric):
     def __init__(self,df,cols):
         super(frequencyMetric,self).__init__(df,cols)
     def measure(self,df):
         length = df.shape[0]
         return np.array([df[c].sum()/length for c in self.cols])
-    
-import profile_v2 as pm2
+""" this version of the profile_miner need a class measuring the profiles """   
 d00 = deepcopy(d2.dataset)
 metCols = ['batteryfaultmonitoring_hvbatstatucat4derate',
                      'batteryfaultmonitoring_hvbatstatuscat6dlybpo',
                      'batteryfaultmonitoring_hvbatstatuscat7nowbpo']
+""" 
+if you see warnings a this stage, the number of clusters may be wrong.
+Change it in the lib code : _sliceCol(f,nbClusterMax= ... )
+"""
 profileTree2 = pm2.ProfileTree(d00,metricClass=frequencyMetric,
                 metricCols=metCols) 
-profileTree2.disp() 
+profileTree2.disp()
 profiles2 = profileTree2.getProfiles()
-profiles2.sort()
 profile_col2 = pm2.apply_profiles(d2.dataset,profileTree2,metCols)
 countProfiles2 = profile_col2.value_counts()
 sizes_count2 = countProfiles2.value_counts()
