@@ -23,6 +23,7 @@ import pandas as pd
 import numpy as np
 from sklearn.cluster import KMeans
 from sklearn.preprocessing import KBinsDiscretizer
+import pywt as wv
 # other
 from bson import json_util
 import pickle as pk
@@ -31,6 +32,8 @@ from copy import deepcopy
 from functools import reduce
 from random import shuffle
 from random import randint
+from copy import deepcopy
+from math import floor
 
 def saveObject(obj,filename):
     outfile = open(filename,'wb')
@@ -67,6 +70,7 @@ nan_counts0 = d0.dataset.isna().sum()
 #sns.pairplot(d0.dataset)
 
 
+""" 1 value only """
 d0.delColumns(["bmselectricalmodulemonitoring_hvbattfusetemperature",
  "messageheader_messagebodytype",
 				"thermalmanagement_hvbattcoolingenergyusd"])
@@ -87,6 +91,9 @@ for date_att in stringToDate:
 d0.setInfos() # my lib needs to refresh information when types change    
 print(d0.typesSummary())
 
+""" better than reload the data when error """
+dd = deepcopy(d0)
+
 # chose some columns to study
 cols_select = ['encryptedvin', 'analyticvin','_cycle','_num_cycle', # groupby cols
                # some measurments
@@ -95,60 +102,91 @@ cols_select = ['encryptedvin', 'analyticvin','_cycle','_num_cycle', # groupby co
                'batteryhealthmonitoring_hvbattstateofhealthpwr',
                'batteryhealthmonitoring_hvbatstateofhealthmax',
                'batterycellmeasurements_hvbattcelltemphottest',
-               'bmselectricalmodulemonitoring_hvbattfusetemperature',
                'bmselectricalmodulemonitoring_hvbattmemtemperature',
+               'other_odometermastervalue', # different scale
+               'other_ambienttemp',
+               'other_vehiclespeed',
                # car mode
                'other_powermode', 'other_odometermastervalue',
-               'other_ambienttemp', 'other_vehiclespeed',
                'other_recordedtime_seconds','cellbalancing_hvbattbalancingstatus',
                # errors
                'batteryfaultmonitoring_hvbatstatucat4derate',
                'batteryfaultmonitoring_hvbatstatuscat6dlybpo',
                'batteryfaultmonitoring_hvbatstatuscat7nowbpo']
 d0.select(cols_select)
-vin_groups = d0.dataset.groupby(by=['encryptedvin', 'analyticvin','_cycle',
-               '_num_cycle'])
-
-"""
-filtered = vin_groups.filter(lambda x: x["IMBALANCE_Percent"].max() > 0.05 and x.shape[0]>5)
-filtered = filtered.reset_index()
-
-regroup = filtered.groupby(by=['encryptedvin', 'analyticvin','_cycle',
-               '_num_cycle'])
-"""
+vin_groups = d0.dataset.groupby(by=['analyticvin','_cycle','_num_cycle'])
+# num necessary to have scale for wavelets
 
 n_groups = len(list(vin_groups.groups.keys()))
 idxGroup = randint(0,n_groups)
 key = list(vin_groups.groups.keys())[idxGroup]
-n_points = 10
-group = d0.dataset.iloc[vin_groups.groups[key]][0:n_points]
+groups = d0.dataset.iloc[vin_groups.groups[key]].reset_index()
 
-plt.figure()
-plt.title(str(key))
-X = group['other_recordedtime_seconds']
-plt.plot(X,1000*np.array(group['IMBALANCE_DELTA_actual']),color="r")
-plt.plot(X,group['batterycellmeasurements_hvbattcurrentext'],color="y")
-plt.plot(X,group['batteryhealthmonitoring_hvbattstateofhealthpwr'],color="g")
-plt.plot(X,group['batteryhealthmonitoring_hvbatstateofhealthmax'],color="b")
-plt.plot(X,group['batterycellmeasurements_hvbattcelltemphottest'],color="c")
-plt.plot(X,group['bmselectricalmodulemonitoring_hvbattfusetemperature'],color="m")
-plt.plot(X,group['bmselectricalmodulemonitoring_hvbattmemtemperature'],color="r")
-plt.plot(X,[0]*len(X),'--k')
-plt.plot(X,[30]*len(X),'--k')
-plt.plot(X,[50]*len(X),'--k')
-plt.legend(['1000*IMBALANCE_Percent',
-               'batterycellmeasurements_hvbattcurrentext',
-               'batteryhealthmonitoring_hvbattstateofhealthpwr',
-               'batteryhealthmonitoring_hvbatstateofhealthmax',
-               'batterycellmeasurements_hvbattcelltemphottest',
-               'bmselectricalmodulemonitoring_hvbattfusetemperature',
-               'bmselectricalmodulemonitoring_hvbattmemtemperature'])
-plt.xlabel("record time (s)")
-plt.ylabel("measure")
-plt.show()
+sub_groups=groups.groupby(by=['encryptedvin'])
 
 
-
-
+def group_analysis_plot(group):
+    X = group['other_recordedtime_seconds']
+    n_points = floor(len(X)*1)
+   
+    X = X.iloc[:n_points+1]
+    X -= X[0]
+    plotsAttribute = ['IMBALANCE_DELTA_actual',
+                   'bmselectricalmodulemonitoring_hvbattmemtemperature',
+                   'other_vehiclespeed',
+                   'other_ambienttemp',
+                   'batterycellmeasurements_hvbattcurrentext']
+    """ delta*1000 """
+    fig,axes = plt.subplots(nrows=2,ncols=2)
+    axes[0,0].set_title(str(key)+" n_points="+str(n_points))
+    axes[0,0].plot(X,1000*np.array(group.loc[:n_points,plotsAttribute[0]]),color="r")
+    axes[0,0].plot(X,group.loc[:n_points,plotsAttribute[1]],color="y")
+    axes[0,0].plot(X,group.loc[:n_points,plotsAttribute[2]],color="g")
+    axes[0,0].plot(X,group.loc[:n_points,plotsAttribute[3]],color="b")
+    axes[0,0].plot(X,group.loc[:n_points,plotsAttribute[4]],color="c")
+    axes[0,0].plot(X,[0]*len(X),'--k')
+    axes[0,0].plot(X,[30]*len(X),'--k')
+    axes[0,0].plot(X,[50]*len(X),'--k')
+    axes[0,0].legend(plotsAttribute)
+    axes[0,0].set_xlabel("record time (s)")
+    axes[0,0].set_ylabel("measure")
+    
+    """
+    we want to compare wavelets transform signals from every group with a unique scale for each signals
+    """
+    
+    # first try on a group
+    def waveCalcul(val,times,win_size,offset,wave):
+        times -= times[0]
+        times2=times[offset:min(offset+win_size,len(times))]
+        val2=val[offset:min(offset+win_size,len(val))].values
+        return wv.cwt(val2,np.arange(1,len(times2)),wave)
+    
+    wave = wv.wavelist("gaus")[0]
+    coeffs0,freq0= waveCalcul(group.loc[:,plotsAttribute[0]],X,len(X),0,wave)
+    coeffs1,freq1= waveCalcul(group.loc[:,plotsAttribute[1]],X,len(X),0,wave)
+    coeffs2,freq2= waveCalcul(group.loc[:,plotsAttribute[2]],X,len(X),0,wave)
+    coeffs3,freq3= waveCalcul(group.loc[:,plotsAttribute[3]],X,len(X),0,wave)
+    coeffs4,freq4= waveCalcul(group.loc[:,plotsAttribute[4]],X,len(X),0,wave)
+    
+    
+    axes[0,1].matshow(coeffs0)
+    axes[0,1].set_title(plotsAttribute[0])
+    """
+    plt.matshow(coeffs1)
+    plt.title(plotsAttribute[1])
+    plt.show()
+    """
+    axes[1,0].matshow(coeffs2)
+    axes[1,0].set_title(plotsAttribute[2])
+    """
+    plt.matshow(coeffs3)
+    plt.title(plotsAttribute[3])
+    plt.show()
+    """
+    axes[1,1].matshow(coeffs4)
+    axes[1,1].set_title(plotsAttribute[4])
+    
+    plt.show()
 
 
