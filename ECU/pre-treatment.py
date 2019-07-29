@@ -10,9 +10,9 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 
-''' Give the mdfreader.Mdf of the file associate to filename
-input : string, filename
-output : mdfreader.Mdf, raw_dict'''  
+#Give the mdfreader.Mdf of the file associate to filename
+#input : string, filename
+#output : mdfreader.Mdf, raw_dict'''  
 def read_data(fileName):
     #counter = 0
     # read data from an mdf file
@@ -27,10 +27,10 @@ def read_data(fileName):
     #print(counter)
     return raw_dict
 
-'''Convert the dict to a pandas dataframe which keep only captors associate to time + an other dataframe with description and unit
-input : mdfreader.Mdf, dic
-        string, time
-output : pandas.Dataframe, df1, df2'''
+#Convert the dict to a pandas dataframe which keep only captors associate to time + an other dataframe with description and unit
+#input : mdfreader.Mdf, dic
+#        string, time
+#output : pandas.Dataframe, df1, df2'''
 def toDataframe(dic,time):
     df1 = pd.DataFrame()
     df2 = pd.DataFrame()
@@ -41,9 +41,9 @@ def toDataframe(dic,time):
     return df1, df2
 
 
-'''Find all key which correspond to time values and give their number of values
-input : mdfreader.Mdf, dic
-output : list, time_list'''
+#Find all key which correspond to time values and give their number of values
+#input : mdfreader.Mdf, dic
+#output : list, time_list'''
 def find_time_s(dic) :
     time_list = []
     for key in dic.keys():
@@ -51,24 +51,24 @@ def find_time_s(dic) :
              time_list.append([key,dic[key]['data'].size])
     return time_list
 
-'''Find the nearest value of value in array
-input : numpy.array, array
-        scalar, value
-output : the nearest value'''
+#Find the nearest value of value in array
+#input : numpy.array, array
+#        scalar, value
+#output : the nearest value'''
 def find_nearest(array,value):
     idx = (np.abs(array-value)).argmin()
     return array[idx]
 
-'''Return true if a and b are similar
-input : float , a, n, rel_tol, abs_tol
-output : boolean'''
+#Return true if a and b are similar
+#input : float , a, n, rel_tol, abs_tol
+#output : boolean'''
 def isclose(a, b, rel_tol=1e-09, abs_tol=0.0):
     return abs(a-b) <= max(rel_tol * max(abs(a), abs(b)), abs_tol)
 
-'''Select only the channels from channelList in dic
-input : mdfreader, dic
-        list, hannelList
-output : mdfreader, ndic (contains a mdfreader which is linked to a dictionnary which contains only the selected attribute)'''
+#Select only the channels from channelList in dic
+#input : mdfreader, dic
+#        list, hannelList
+#output : mdfreader, ndic (contains a mdfreader which is linked to a dictionnary which contains only the selected attribute)'''
 def selectChannels(dic,channelList):
     newDic = {}
     keys = dic.keys()
@@ -84,9 +84,9 @@ def selectChannels(dic,channelList):
             newDic[channel] = dic[channel]
     return newDic
 
-'''Make an aproximation where each captor not associated with the more precise clock are associated to the nearest value of time for each value
-input : mdfreader.Mdf, dic
-output : pandas.Dataframe, df, dfbis'''
+#Make an aproximation where each captor not associated with the more precise clock are associated to the nearest value of time for each value
+#input : mdfreader.Mdf, dic
+#output : pandas.Dataframe, df, dfbis'''
 def sum_up_time(dic) :
     #Fist, I choose the time that I will keep
     df = pd.DataFrame()
@@ -149,10 +149,63 @@ def sum_up_time(dic) :
     df = df[cols]
     return df, dfbis
 
-'''Delete column with more than ratio NaN
-input : mdfreader, dic
-        float, ratio
-ourput : Dataframe, df simplified'''
+#Make an aproximation where each captor not associated with the more precise clock are associated to the nearest value of time for each value
+#input : mdfreader.Mdf, dic
+#output : pandas.Dataframe, df, dfbis'''
+def sum_up_time2(dic,timeRate) :
+    #Fist, I choose the time that I will keep
+    df = pd.DataFrame()
+    dfbis = pd.DataFrame()
+    maxTime = 0
+    for key in dic.keys() :
+        if (key[0:4] == 'time') and dic[key]['data'].max() > maxTime  :
+            maxTime = dic[key]['data'].max()
+    time_values = np.arange(0.1,maxTime,timeRate)
+    df['time'] = time_values
+    #Secondly, we need to built the two final dataframe
+    for key in dic.keys():
+        if key[0:4] == 'time' or key[0] == '$' : # We ignored other time
+            None
+        else : #We studied a captor with an other time 
+            time_studied = dic[dic[key]['master']]['data']
+            capt_studied = dic[key]['data']
+            result =[[],[]]
+            const = [find_nearest(time_values,time_studied[0]),capt_studied[0]]
+            for i in range(1,len(time_studied)) :
+                nearest = find_nearest(time_values,time_studied[i])
+                if nearest == const[0] :
+                    const.append(capt_studied[i])
+                else : 
+                    result[0].append(sum(const[1:len(const)])/(len(const)-1))
+                    result[1].append(const[0])
+                    const = [nearest,capt_studied[i]]
+            result[0].append(sum(const[1:len(const)])/(len(const)-1))
+            result[1].append(const[0])
+            # We create the compatible array to write it in our dataframe
+            array = np.zeros(len(time_values))
+            array.fill(np.nan)
+            continuer = True
+            t1,t2 = 0,0
+            while continuer :
+                if time_values[t1] == result[1][t2]:
+                    array[t1] = result[0][t2]
+                    t1 += 1
+                    t2 += 1
+                elif time_values[t1] < result[1][t2] :
+                    t1 += 1
+                else :
+                    t2 += 1
+                if t1 == len(time_values) or t2 == len(result[1]) :
+                    continuer = False
+            df[key] = array
+            dfbis[key] = [dic[key]['description'],dic[key]['unit']]
+        #print(key + ' done')
+    return df, dfbis
+
+#Delete column with more than ratio NaN
+#input : mdfreader, dic
+#        float, ratio
+#output : Dataframe, df simplified'''
 def dropAttNan(dic,ratio) :
     listViable = []
     for key in dic.keys() :
@@ -165,10 +218,21 @@ def dropAttNan(dic,ratio) :
     return ndic
     #print('data simplified')
 
-'''Delete column with more than ratio NaN
-input : mdfreader, dic
-        float, ratio
-ourput : Dataframe, df simplified'''
+#Same that above for dataframe'''
+def dropNaN(data,ratio) :
+    listViable = []
+    for c in data.columns :
+        nbTotal = data.shape[0]
+        nbNaN = nbTotal - data.loc[:,c].dropna().size
+        if nbNaN/nbTotal < ratio :
+            listViable.append(c)
+    dataN = data.loc[:,listViable]
+    return dataN
+
+#Delete column with more than ratio NaN
+#input : mdfreader, dic
+#        float, ratio
+#output : Dataframe, df simplified'''
 def dropAttZeros(dic,ratio) :
     listViable = []
     for key in dic.keys() :
@@ -180,10 +244,21 @@ def dropAttZeros(dic,ratio) :
     ndic = selectChannels(dic,listViable)
     return ndic
 
-'''Compute a dictionnary which tell us how many times a sensor appear in a family of data. nan and zero are boolean which can tell if we igmored or not nan and zero
-input : mdfreader, dic
-        boolean, nan, zero
-output : dictionnay, occ'''
+# Same that above for dataframe and for all constant values'''
+def dropConstant(data,ratio) :
+    listViable = []
+    for c in data.columns :
+        nbTotal = data.shape[0]
+        nbNConstant = nbTotal - data.loc[:,c].drop_duplicates().size
+        if nbNConstant/nbTotal < ratio :
+            listViable.append(c)
+    dataN = data.loc[:,listViable]
+    return dataN
+
+#Compute a dictionnary which tell us how many times a sensor appear in a family of data. nan and zero are boolean which can tell if we igmored or not nan and zero
+#input : mdfreader, dic
+#        boolean, nan, zero
+#output : dictionnay, occ'''
 def findOcc(cycle,nan,zero) :
     occ = {}
     for file in cycle:
@@ -234,8 +309,6 @@ for i in range(0,5) :
         if occ[i][key]>=minOccurences[i]:
             remainingChannels[i].append(key)
     print('occ ' + str(i) + ' finished')
-            
-#TODO : Other selections
     
 
 for i in range(0,5) : 
@@ -243,7 +316,12 @@ for i in range(0,5) :
         dic = mdfreader.Mdf(file)
         ndic = selectChannels(dic,remainingChannels[i])
         target = 'ECUdata\\csvCycle' + str(i) + '\\'
-        df,dfbis = sum_up_time(ndic)
+        df,dfbis = sum_up_time2(ndic,0.1)
+        #Some last filter
+        #df = deleteCorrelations(df, 0.9)
+        df = dropNaN(df,0.5)
+        df = dropConstant(df,0.99)
+        #Let's write it
         filetab = file.split('\\')
         df.to_csv(target + filetab[len(filetab)-1] + '.csv')
         dfbis.to_csv(target + filetab[len(filetab)-1] + 'desc.csv')
