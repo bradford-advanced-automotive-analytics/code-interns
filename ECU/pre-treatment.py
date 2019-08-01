@@ -8,7 +8,7 @@ Created on Fri Jul 19 09:42:51 2019
 import mdfreader
 import pandas as pd
 import numpy as np
-import matplotlib.pyplot as plt
+
 
 #Give the mdfreader.Mdf of the file associate to filename
 #input : string, filename

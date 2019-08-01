@@ -7,12 +7,31 @@ Created on Mon Jul 29 11:38:35 2019
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-import math
+from math import *
 from sklearn.linear_model import LinearRegression
+from sklearn.preprocessing import StandardScaler
+from sklearn.preprocessing import MinMaxScaler
+from sklearn.preprocessing import RobustScaler
+import treatment as t
 from saxpy.znorm import znorm
 from saxpy.paa import paa
 from saxpy.sax import ts_to_string
 from saxpy.alphabet import cuts_for_asize
+import string
+
+alphabet = string.ascii_uppercase + string.ascii_lowercase
+
+
+#data to test
+file = '00_drivingCycle00.dat.csv'
+df = pd.read_csv(file)
+df = df.fillna(method='ffill')
+    
+    
+robustScaler = RobustScaler()
+minMaxScaler = MinMaxScaler() 
+standardScaler = StandardScaler()
+
 
 #describe x position with seuil
 #input : float : x, seuil
@@ -24,40 +43,42 @@ def convertLR(x,seuil):
         return 'a'
     else:
         return 'b'
+    
 
+#Call the function above on each element
+#input : dataframe, df
+#       float, thresh
+#output : dataframe of character
+def LRtransform(df,thresh):
+    return df.applymap(lambda x : convertLR(x,thresh))
 
 #Subfonction for tree_encoding function which return the correct letter
-#input : float : x, minG
+#input : float : x
 #       integer : long, nbAlpha
-#       boolean : sens
 #output : character
-def alpha(x,minG,long,sens,nbAlpha) :
-    if sens :
-        return alphabet[min([nbAlpha-1,int((x - minG)//long)])]
+def alpha(x,long,nbAlpha) :
+    result = x/long
+    if result == 0 :
+        ind = (ceil(nbAlpha/2) - 1)
+    elif result < 0 :
+        ind = max(0,(ceil(nbAlpha/2) - 1) + round(result))
     else :
-        return alphabet[max([0,int((x - minG)//long)])]
+        ind = min(nbAlpha-1,(ceil(nbAlpha/2) - 1) + round(result))
+    ind = nbAlpha - 1 - ind 
+    return alphabet[int(ind)]
 
 #Realise a tree_encoding, on the given dataframe with the given height
 #input : dataframe, df
 #       integer, height
 #output : emcoded dataframe
 def tree_encoding(df,height):
-    ndf = df.copy()
-    minG = ndf.min().min()
-    aminG = abs(minG)
-    if minG < 0 :
-        ndf = ndf.applymap(lambda x : x + abs(minG))
-        minG = 0
-    maxG = ndf.max().max()
-    amaxG = abs(maxG)
+    ndf = df.drop(columns=['time']).copy()
+    ndf[ndf.columns] = robustScaler.fit_transform(ndf[ndf.columns])
+    amaxMed = abs(ndf.max().min())
+    aminMed = abs(ndf.min().max())
     nbAlpha = 2**height + 1
-    if aminG < amaxG :
-        longueur = (2*aminG)/nbAlpha
-        sens = True
-    else :
-        longueur = (2*amaxG)/nbAlpha
-        sens = False
-    return ndf.applymap(lambda x :alpha(x,minG,longueur,sens,nbAlpha)) 
+    longueur = (amaxMed + aminMed)/nbAlpha
+    return ndf.applymap(lambda x : alpha(x,longueur,nbAlpha))
 
 
 #Sunfonction of splitHoops, which ttell if we must split now or not
@@ -91,3 +112,17 @@ def splitHoops(df,referenceKey,splitFunction):
     listdf.append(df[curseur:df.shape[0]])
     return listdf
 
+
+#Give the list of hoops with the corresponding values
+#input : list of dataframe of character, listhoops
+#        dataframe, df
+#       integer, segmentSize
+#output : list of dataframe with values
+def getValuesHoops(listHoops,df,segmentSize):
+    hoopsValues = []
+    for hoop in listHoops:
+        index = list(hoop.index)
+        start = index[0]*segmentSize
+        end = index[-1]*segmentSize
+        hoopsValues.append(df.loc[start:end])
+    return hoopsValues
