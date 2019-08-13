@@ -6,10 +6,18 @@ Created on Tue Jul 30 15:20:51 2019
 """
 
 import numpy as np
-import matplotlib.pyplot as plt
-from math import ceil
-import random
+import pandas as pd
+from scipy.interpolate import interp1d
+from bio import Cluster
 
+#Apply a MinMaxScaler on a dataframe
+#input : dataframe, df
+#output : scaled dataframe
+def MinMaxScaler(df):
+    newDf = df.copy()
+    newDf -= newDf.min()
+    newDf /= newDf.max()
+    return newDf
 
 
 
@@ -36,51 +44,61 @@ def toStatVectors(dflistValues) :
         sortie.append(row)
     return sortie
 
+# get longest hoop for number of points of interpolation
+#input : listHoopsValues : list of values
+#output : length of the biggest hoops 
+def maxLength(listHoopsValues):
+    maxLength = 0
+    for hoop in listHoopsValues:
+        if len(hoop) > maxLength:
+            maxLength = len(hoop)
+    return maxLength
 
-#Draw some hoops of each cluster
-#input : list of hoop with onnly 2 sensors, df_list_vS
-#       a vector which containe the clusterization, repartition
-#       Maximal number of graph by cluster, nbGraphMax
-#output : drawed hoops
-def drawHoopsClust(df_list_vS,repartition,nbGraphMax) :
-    nbCluster = np.unique(repartition).size
-    list_cluster = []
-    for i in range(0,nbCluster) :
-        list_cluster.append([])
-    for i in range(0,len(repartition)) :
-        if len(list_cluster[repartition[i]]) < nbGraphMax :
-            list_cluster[repartition[i]].append(i)
-        elif random.randint(0,1) == 0 :
-            loser = random.randint(0,nbGraphMax-1)
-            list_cluster[repartition[i]][loser] = i         
-    for i in range(0,nbCluster) :
-        data = list_cluster[i]
-        fig, axs = plt.subplots(ceil(len(data)/2), 2)
-        fig.suptitle('Cluster '+str(i))
-        for j in range(0,ceil(len(data)/2)):
-            val = []
-            name = []
-            for key in df_list_vS[data[j]].columns :
-                val.append(df_list_vS[data[j]][key].values)
-                name.append(key)
-            axs[j,0].plot(val[0],val[1])
-            axs[j,0].plot(val[0][0],val[1][0],'o')
-            axs[j,0].set_title('Hoops '+ str(j), fontsize=10)
-            axs[j,0].set_xlabel(name[0])
-            axs[j,0].set_ylabel(name[1])
-        for j in range(ceil(len(data)/2),len(data)):
-            val = []
-            name = []
-            jbis = j - ceil(len(data)/2)
-            for key in df_list_vS[data[j]].columns :
-                val.append(df_list_vS[data[j]][key].values)
-                name.append(key)
-            axs[jbis,1].plot(val[0],val[1])
-            axs[jbis,1].plot(val[0][0],val[1][0],'o')
-            axs[jbis,1].set_title('Hoops '+ str(j), fontsize=10)
-            axs[jbis,1].set_xlabel(name[0])
-            axs[jbis,1].set_ylabel(name[1])
-        fig.tight_layout()
-        plt.show()
+# interpolate every hoops
+#input : listHoopsValues : list of values
+#       list of string, focused column
+#output : interpolated hoops
+def convertHoops(listHoopsValues,focusedColumn):
+    newList = []
+    newLength = maxLength(listHoopsValues)
+    time = np.linspace(0, 1, newLength)
+    for hoop in listHoopsValues:
+        if hoop[focusedColumn[0]].size > 1 :
+            points = MinMaxScaler(hoop[focusedColumn]).values
+            distance = np.cumsum( np.sqrt(np.sum( np.diff(points, axis=0)**2, axis=1 )) )
+            distance = np.insert(distance, 0, 0)/distance[-1]
+            interpolator =  interp1d(distance, points, kind='slinear', axis=0)
+            interpolated_points = interpolator(time)
+            newDf = pd.DataFrame()
+            newDf['time'] = time
+            newDf[focusedColumn[0]] = interpolated_points[:,0]
+            newDf[focusedColumn[1]] = interpolated_points[:,1]
+            newList.append(newDf)
+    return newList
+
+# compute distance between two hoops:
+#input : two interpolated hoops, hoop1, hoop2
+#       two string, column1, column2
+#output : diatance between
+def computeDistance(hoop1,hoop2,column1,column2):
+    return sum(abs(hoop1[column1]-hoop2[column1])**2+abs(hoop1[column2]-hoop2[column2])**2)
+
+# Distance matrix between hoops using interpolation and sum of distance between points
+def distanceMatrix3(listHoopsValuesInterpolated,focusedColumn):
+    n = len(listHoopsValuesInterpolated)
+    matrix = pd.DataFrame(0.0, index=np.arange(n), columns=np.arange(n))
+    for i in range(n):
+        matrix.iloc[i][i] = 0
+        hoop1 = listHoopsValuesInterpolated[i][focusedColumn]
+        for j in range(i+1,n):
+            hoop2 = listHoopsValuesInterpolated[j][focusedColumn]
+            distance = computeDistance(hoop1,hoop2,focusedColumn[0],focusedColumn[1])
+            matrix.iloc[i][j] = distance
+            matrix.iloc[j][i] = distance
+    return matrix
+
+
+
+
 
     

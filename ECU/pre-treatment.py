@@ -202,6 +202,35 @@ def sum_up_time2(dic,timeRate) :
         #print(key + ' done')
     return df, dfbis
 
+#sample the data at a set frequency
+#input:  dic: dictionary
+#        df: dataframe appending to
+#        frequency: sampling frequency
+#output: sampled dataframe
+def sampleData(dic, df, frequency):
+    times = []
+    maxTime = 0
+    for key in dic.keys():
+        if key[0:4] == 'time':
+            times.append(key)
+            if dic[key]['data'].max() > maxTime:
+                maxTime = dic[key]['data'].max()
+    for time in times:
+        df1,df2 = toDataframe(dic, time)
+        for t in np.arange(0, maxTime, 1/frequency):
+            subset = df1.loc[(df1[time]>=(t-((1/frequency)/2))) & (df1[time]<(t+((1/frequency)/2)))]
+            subsetMean = subset.mean()
+            subsetMean[time] = t
+            for key in subsetMean.keys():
+                if key not in times[1:]:
+                    df.loc[t*frequency, key] = subsetMean[key]
+    correctName = {}
+    for c in df.columns :
+        if c[0:4]=='time' :
+            correctName[c] = 'time'
+    df = df.rename(columns=correctName)
+    return df
+
 #Delete column with more than ratio NaN
 #input : mdfreader, dic
 #        float, ratio
@@ -274,6 +303,27 @@ def findOcc(cycle,nan,zero) :
             else :
                 occ[key] = 1
     return occ
+
+#Compute a dictionnary which tell us how many times a sensor appear in a family of data. nan and zero are boolean which can tell if we igmored or not nan and zero
+#input : mdfreader, dic
+#        boolean, nan, zero
+#output : dictionnay, occ'''
+def findOcc2(cycle,nan,zero) :
+    occ = {}
+    for folder in cycle :
+        for file in folder:
+            dic = mdfreader.Mdf(file)
+            if nan :
+                dic = dropAttNan(dic,0.5)
+            if zero :
+                dic = dropAttZeros(dic,0.99)
+            keys = dic.keys()
+            for key in keys:
+                if key in occ.keys():
+                    occ[key] += 1
+                else :
+                    occ[key] = 1
+    return occ
    
 #-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 #-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -294,7 +344,7 @@ fileNames.append(fileNames1)
 fileNames.append(fileNames2)
 fileNames.append(fileNames3)
 fileNames.append(fileNames4)
-
+'''
 occ = [findOcc(fileNames0,True,True)]
 occ.append(findOcc(fileNames1,True,True))
 occ.append(findOcc(fileNames2,True,True))
@@ -309,21 +359,17 @@ for i in range(0,5) :
         if occ[i][key]>=minOccurences[i]:
             remainingChannels[i].append(key)
     print('occ ' + str(i) + ' finished')
-    
+'''
+conserve = ['CHdT_t', 'Exh_tPFltUs', 'PFltLd_mSotMeas', 'Exh_tOxiCatUsB2', 'Exh_tTrbnUs', 'EnvP_p', 'CoEng_st', 'DFES_numDFC_[4]', 'DFES_numDFC_[0]', 'CoEOM_stOpModeAct', 'DFES_numDFC_[2]', 'Air_tAFS', 'EEM_trqAlt', 'Air_tCACDs', 'Air_pCACDs', 'EnvT_t', 'ASMod_dmExhMnfDs', 'Exh_pAdapPPFltDiff', 'VehV_v', 'PthLead_trqInrCurr', 'PFltLd_mSotSim', 'PFltLd_mSot', 'Exh_dmNOxNoCat2Ds', 'CHdT_tClntMod', 'LSU_rLam_[0]', 'CEngDsT_t', 'RailP_pFlt', 'BattU_u', 'Oil_tSwmp', 'DFES_numDFC_[3]', 'Exh_dmNOxNSCDs', 'DFES_numDFC_[1]', 'SCRMod_mEstNH3Ld', 'Exh_tPFltDs', 'AirCtl_qDesVal', 'ActMod_trqClth', 'Rail_pSetPoint', 'Lub_rFuelInOil', 'SCRT_tAvrg', 'DFES_numDFC_[5]', 'PCR_swtGov', 'Exh_pTrbnUs', 'APP_r', 'AFS_dm', 'SmkLim_mAirPerCyl', 'PCR_stMon', 'PCR_pGovDvt', 'ThrVlv_rAct', 'InjCrv_phiMI1Des', 'InjCrv_phiPiI1Des', 'EGRVlvLP_rAct', 'EGRVlv_rAct', 'PthSet_trqInrSet', 'PEGRLPDiff_p', 'AirCtl_mDesVal', 'TrbCh_rAct', 'Exh_rNOxNSCDs', 'EngReq_trqInrLimSmk', 'InjCrv_qPoI2Des_mp', 'SmkLim_qLimSmk', 'InjCrv_phiPoI2Des', 'PCR_pDesVal', 'InjCrv_qPiI1Des_mp', 'AirCtl_stMon', 'InjSys_qTot', 'InjCtl_qSetUnBal', 'Air_pIntkVUs', 'InjCrv_qMI1Des', 'InjCrv_qPoI1Des_mp', 'Epm_nEng', '$CalibrationLog', '$ActiveCalibrationPage', '$EVENT_COMMENTS', 'Exh_tAdapTTrbnUs', 'SCRT_tUCatDsT', 'NSCDs_rLam', 'NSCLd_mSOxFld_[0]', 'PFltRgn_lSnceRgn', 'NSCRgn_stStM', 'Exh_rNOxNoCat2Ds', 'ASMod_rEGR', 'SCRAd_rNH3', 'NSCLd_mNOxFld_[0]', 'PFltLd_mSotSimCont', 'Exh_stNOxNSCDs', 'Exh_stNOxNoCat2Ds', 'DStgy_dmRdcAgDes', 'ASMod_pIndVol', 'ExhMod_ratNOXEGSys', 'Tra_numGear', 'InjCrv_phiPoI1Des', 'SCRFFC_etaPreCtlMode2', 'AirCtl_mAirPerCylDesDyn_r32', 'InjCrv_qPoI3Des_mp', 'InjCrv_phiPoI3Des', 'SCRMod_rNO2NOx', 'UDC_mRdcAgDosQnt', 'InjCrv_numPoI1Splt', 'SCRMod_rEstNOxDs', 'GlbDa_lTotDstKm', 'NSCRgn_stIntrShrtDNOxWd_mp', 'NSCRgn_stIntrLonDNOxWd_mp', 'SCRFFC_dmNOxUs', 'NSCRgn_stDem']
 
-for i in range(0,5) : 
+for i in [1,4] : 
     for file in fileNames[i]:
         dic = mdfreader.Mdf(file)
-        ndic = selectChannels(dic,remainingChannels[i])
+        ndic = selectChannels(dic,conserve)
         target = 'ECUdata\\csvCycle' + str(i) + '\\'
-        df,dfbis = sum_up_time2(ndic,0.1)
-        #Some last filter
-        #df = deleteCorrelations(df, 0.9)
-        df = dropNaN(df,0.5)
-        df = dropConstant(df,0.99)
+        df = sampleData(ndic,pd.DataFrame(),10)
         #Let's write it
         filetab = file.split('\\')
-        df.to_csv(target + filetab[len(filetab)-1] + '.csv')
-        dfbis.to_csv(target + filetab[len(filetab)-1] + 'desc.csv')
+        df.to_csv(target + filetab[len(filetab)-1] + 'NEW.csv')
         print (file + ' finished')
         

@@ -17,6 +17,9 @@ from mpl_toolkits.mplot3d import Axes3D
 import treatment as t
 import hoops as h
 import clusterHoops as c
+import visualization as v
+from bio import Cluster
+
 
 
 #Firstly, you need to initialize some object
@@ -43,26 +46,41 @@ df = t.deleteCorrelations(df,0.95,savedColumns)
 dfdiscret = t.RegDiscretisation(df,10)
 
 #Choose an symbolic representation function from hoops.py
-dfsymbolic = h.tree_encoding(dfdiscret,1)
+dfsymbolic = h.tree_encoding2(dfdiscret,[0.8,0.5,0.3])
+
+v.topicture(dfsymbolic[['VehV_v','ActMod_trqClth']],9)
+
+
+#Make some probabilities
+p1 = h.probahoops(dfsymbolic,3,1)
+p2 = h.probahoops(dfsymbolic,3,2)
+p3 = h.probahoops(dfsymbolic,3,3)
 
 #Then, split your hoops with splitHoops function. Be sure to chosse your reference key and your method to split it correctly
-df_list_symbolic = h.splitHoops(dfsymbolic,'ActMod_trqClth',h.splitEngineTorqueIncrease)
+df_list_symbolic = h.splitHoops(dfsymbolic,'ActMod_trqClth',h.splitEngineTorqueIncrease2)
 df_list_values = h.getValuesHoops(df_list_symbolic,df,10)
 
 #Choose the sensors that you want to focus
-focusedColumns = ['ActMod_trqClth','VehV_v']
-df_list_values_focused = c.select_list_channels(df_list_values,['ActMod_trqClth','VehV_v'])
+focusedColumns = ['VehV_v','ActMod_trqClth']
+df_list_values_focused = c.select_list_channels(df_list_values,focusedColumns)
+
+
 
 #Use your clusterization method (for example, statVector/acp/kmeans)
+
 test = c.toStatVectors(df_list_values_focused)
 test = standardScaler.fit_transform(test)
+test = pd.DataFrame(test).fillna(method='ffill').values
 output = acp.fit_transform(test)
 kmeans = KMeans(n_clusters=2).fit(output.transpose()[0:3].transpose())
+
+    
 
 #Draw your clusterization
 #In 2D
 fig = plt.figure()
-plt.plot()
+plt.plot(acp.explained_variance_ratio_)
+plt.title('Percentage of information for each eigen value')
 
 #In 3D
 fig2 = plt.figure()
@@ -71,8 +89,8 @@ ax.scatter(output[:,0], output[:,1], output[:,2],c= kmeans.labels_.astype(float)
 plt.show()
 
 #Choose a pair of sensors on which you want to draw their hoops
-pair = ['ActMod_trqClth','VehV_v']
+pair = ['VehV_v','ActMod_trqClth']
 listS = c.select_list_channels(df_list_values,pair)
 
 #Finally, draw some hoops on each cluster and enjoy 
-c.drawHoopsClust(listS,kmeans.labels_,6)
+v.drawHoopsClust(listS,kmeans.labels_,4)

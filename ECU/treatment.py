@@ -1,6 +1,5 @@
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
 import math
 from sklearn.linear_model import LinearRegression
 from sklearn.preprocessing import StandardScaler
@@ -47,7 +46,24 @@ def RegDiscretisation(df,segmentSize):
             newDf.loc[i,c] = float(regression_model.coef_)
     return newDf
 
-
+# find the 0 centered window that contains a certain percentage of the values (data must me normally scaled)
+#input : dataframe, df
+#       float between 0 and 1, percentage
+#       string, column
+#       float, value,maxValue,eps
+#output : optimized threhold 
+def findOptimum(df,percentage,column,value=None,maxValue=None,eps=None):
+    maxValue = maxValue or df[column].max()
+    value = value or df[column].max()/2
+    eps = eps or 0.05
+    proportion = len(df.loc[(df[column]<value) & (df[column]>-value)]) / len(df)
+    if abs(proportion-percentage)<eps:
+        return value
+    else:
+        if proportion>percentage:
+            return findOptimum(df,percentage,column,value/2,value,eps)
+        else:
+            return findOptimum(df,percentage,column,value,(value+maxValue)/2,eps)
 
 
 #data should be normalised before use
@@ -90,23 +106,6 @@ def deleteCorrelations(df, threshold, keepSensors):
             if columnsToDelete == []:
                 return df
         return deleteCorrelations(df.drop(columns = columnsToDelete), threshold, keepSensors)
-
-#Plot curbs of column versus time, one with the values, the other with his linear regression
-# input : dataframe, df
-#         string, column
-#         integer, segmentSize
-#output : a plot 
-def plotLR(df,column,segmentSize):
-    newDf = pd.DataFrame(columns = ['time',column])
-    nbSegments = math.ceil(len(df)/segmentSize)
-    segments = np.array_split(df,nbSegments)
-    for i in range(len(segments)):
-        regression_model = LinearRegression()
-        regression_model.fit(segments[i]['time'].values.reshape(-1,1),segments[i][column].values)
-        plt.plot(segments[i]['time'],regression_model.predict(segments[i]['time'].values.reshape(-1,1)),color='r')
-        plt.plot(segments[i]['time'],segments[i][column],color='b')
-        pylab.legend(loc='upper left')
-
 
 
 
