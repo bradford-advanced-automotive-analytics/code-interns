@@ -4,6 +4,10 @@ Created on Sat Jul 13 00:31:23 2019
 
 @author: samue
 """
+
+__version__ = 1.0
+__autor__ = "Squillaci Samuel"
+
 from anytree import Node, RenderTree
 from anytree.exporter import DotExporter
 
@@ -85,7 +89,12 @@ def _cutOnColumnValues(df,col,val):
     for v,count in val.items():
         d.append( (df[df[col] == v].drop(columns=[col]),AttributeInstance({col:v},count/sum(val.values))) )
     return d
-
+def cutOnValues(df,col):
+    val = df[col].value_counts()
+    d = {}
+    for v,count in val.items():
+        d[v]=df[df[col] == v].drop(columns=[col])
+    return d
 def _sliceCol(f,col=None):
     df = f[0]
     par = f[1]

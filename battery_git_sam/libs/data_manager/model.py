@@ -35,9 +35,9 @@ Param :
 """
 class dateProcessor(processingModel):
     """
-    @TODO : remove non continuous dates
+    @TODO : remove non continuous dates?
     """
-    def __init__(self,dataManager,columns,strategy="year",epoch=datetime.datetime(2000,1,1)):
+    def __init__(self,dataManager,columns,strategy="year",epoch=None):
         super().__init__(dataManager)
         self.strategy = strategy
         self.columns = columns
@@ -48,17 +48,18 @@ class dateProcessor(processingModel):
     def checkConsistency(self,dm):
         t = dm.typesSummary()[0]
         for col in self.columns:
-            if(not col in t["datetime"] and not col in t["timedelta"] and not col in t["datetimetz"]):
+            if(not col in t["datetime64"] and not col in t["timedelta"] and not col in t["datetimetz"]):
                 print("Consistency : some columns doesn't exist or are not date columns : "+col)
                 return False
         return True
     def center(self,dm,column_name):
-        print(" verifications (overhead)... ")
+        print(" verifications ... ")
         t = dm.typesSummary()[0]
         for col in self.columns: # check if all columns are ok
-            if(not col in t["timedelta"] and not col in t["datetimetz"] and not t["datetime"]):
+            if(not col in t["timedelta"] and not col in t["datetimetz"] and not t["datetime64"]):
                 print(col+" not a date anymore. Dataframe seems to be modified.")
                 assert(False)
+        print("running")
         for col in self.columns:
             other = dm.dataset[column_name].apply(lambda d : d.replace(tzinfo=None))
             dm.dataset[col] = (dm.dataset[col].apply(lambda d : d.replace(tzinfo=None)) - other).apply(lambda d : d.total_seconds())
@@ -66,17 +67,18 @@ class dateProcessor(processingModel):
             dm.columnManagers[col].isNumerous = True
             dm.columnManagers[col].fromCategorical = False
             dm.dataTypes[col] = DataInfo(dataType.NUMERICAL,dataNature.CONTINOUS)
+        print("done.")
     """ Guess the time spend to perform the transformation """
     def measureTime(self,dm,test_values = np.linspace(0.1,0.3,num=5,endpoint=True)):
         t = dm.typesSummary()[0]
-        lengths = np.array([len(t["datetime"]), len(t["timedelta"]), len(t["datetimetz"])])
+        lengths = np.array([len(t["datetime64"]), len(t["timedelta"]), len(t["datetimetz"])])
         T = []
         dmC = copy.deepcopy(dm)
         dmC.select(dmC.getDatesColumns())
         for val in test_values:    
             dmCop = DataManager(dmC.dataset.sample(frac=val,replace=True,random_state=1))
             if(lengths[0]>0): # measure time for a random datetime column
-                lis = rd.sample(list(t["datetime"]),1)[0]
+                lis = rd.sample(list(t["datetime64"]),1)[0]
                 start = time()
                 dmCop.extractDate(lis,self.strategy)
                 elapsedDT = time()
@@ -118,7 +120,7 @@ class dateProcessor(processingModel):
             if (col in t["timedelta"] or col in t["datetimetz"] or col in t["datetime"]):
                 dm.continuousDateToFloat(col,self.epoch)
                 print(col+" continuous dates converted.")
-            elif(col in t["datetime"]): # STUPID ?
+            elif(col in t["datetime64"]): # STUPID ?
                 dm.extractDate(col,self.strategy) 
                 print(col+" converted according to the strategy.")
         elapsed = time()

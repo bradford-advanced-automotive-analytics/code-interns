@@ -12,7 +12,8 @@ from enum import Enum
 from collections import namedtuple
 import scipy.sparse as sp
 import datetime
-
+from sklearn.preprocessing import KBinsDiscretizer
+from copy import deepcopy
 """ 
 Don't change the values at any cost! Because of of cache problems 
 enum.type.STRING == enum.type.STRING return False.
@@ -35,7 +36,7 @@ DataInfo = namedtuple("DataInfo", "type nature")
 Used to transform data from categorical to numerous in the dataset directly.
 NaN should not exist on this column.
 """
-class _ColumnManager:
+class _ColumnManager:  
     def __init__(self,column_name,isNumerous,fromCategorical,isDate=False):
         assert(len(column_name)>0)
         self.isDate = isDate
@@ -43,7 +44,8 @@ class _ColumnManager:
         self.isNumerous = isNumerous
         self.fromCategorical = fromCategorical #bool
         self.dictionnary = {}
-        self.columns = {}
+        self.columns = {}        
+    
     """ for datetime only, not datetimetz nor timedelta"""
     def _extractDate(self,dataset,attribute="year"):
         assert(self.isDate)
@@ -72,12 +74,16 @@ class _ColumnManager:
         assert(self.isDate)
         assert(not self.isNumerous)
         assert(not self.fromCategorical)
-        dataset[self.column_name] = dataset[self.column_name].apply(
-                lambda d : (d - epoch.replace(tzinfo=d.tzinfo)).total_seconds())
+        if(epoch!=None):
+            dataset[self.column_name] = dataset[self.column_name].apply(
+                    lambda d : (d - epoch.replace(tzinfo=d.tzinfo)).total_seconds())
+        else :
+            dataset[self.column_name] = dataset[self.column_name].apply(
+                lambda d : d.total_seconds())
         self.isDate = False
         self.isNumerous = True
     def _prefix(self,dataset):
-        dataset[self.column_name].apply(lambda x : self.column_name+"_bin"+str(x))
+        dataset[self.column_name] = dataset[self.column_name].apply(lambda x : self.column_name+"/"+str(x))
     def _stringToContinous(self,dataset,saveInSparse):
         assert(not(self.isNumerous))
         assert(self.fromCategorical)
@@ -88,7 +94,7 @@ class _ColumnManager:
             elmt = float(elmt)
         return dico
     def _splitToNumerous(self,dataset):
-        """ peut etre ;ieux
+        """ peut etre mieux
                 results = np.zeros((len(sequences), dimension))
                 for i, word_indices in enumerate(sequences):
                     results[i, word_indices] = 1.0  # set specific indices of results[i] to 1s
@@ -117,29 +123,30 @@ class _ColumnManager:
         [dataset.pop(col) for col in self.columns]
         return
     """
-    Non invertible transformation. Cut into boolean bins.
-    Not the smartest way to di this but it works. (maybe use pandas.cut?)
+    Non invertible transformation. Cut into bins.
     """
-    def _cutIntoBins(self,nbins,isNormalized,dataset,overwrite=False):
+    def _cutIntoBins(self,nbins,dataset,strat="quantile"):
         old = dataset[self.column_name]
-        if(isNormalized):
-            ma = 1
-            mi = 0
-        else :
-            ma = float(old.max())
-            mi = float(old.min())
-        bins = np.linspace(mi,ma,nbins+1)
-        if(not(overwrite)):
-            for i in range(len(bins)-1):
-                dataset[self.column_name+'_bin'+str(i)] = [0.0]*(np.shape(dataset)[0])
-            for i,row in dataset.iterrows():
-                bin_num = dichotomySearch(row[self.column_name],bins)
-                dataset.loc[i,self.column_name+'_bin'+str(bin_num)]=1.0
-            dataset.pop(self.column_name)
-        else:
-            dataset[self.column_name] = dataset[self.column_name].apply(lambda x : self.column_name+"_bin"+str(dichotomySearch(float(x),bins)))
+        binD = KBinsDiscretizer(nbins,encode="ordinal",strategy=strat)
+        binD.fit(np.array(old.values).reshape(-1,1))
+        dataset[self.column_name] = binD.transform(np.array(old.values).reshape(-1,1))
+        edges = list(binD.bin_edges_[0])
+        dataset[self.column_name] = dataset[self.column_name].apply(lambda p : self.column_name+"["+str(edges[int(p)])+"-"+str(edges[int(p+1)])+"]")
+        return dataset[self.column_name]
+    """
+    Intervals based on given threshold.
+    """
+    def _thresholdDistr(self,thresholds,dataset):
+        c = dataset[self.column_name]
+        masks = []
+        for i in range(len(thresholds)-1):
+            inf = c>=thresholds[i]
+            sup = c<thresholds[i+1]
+            masks.append( inf & sup  )
+        for i,mask in enumerate(masks):
+            c[mask] = self.column_name + "_["+str(thresholds[i])+";"+ str(thresholds[i+1]) +"]"      
+        dataset[self.column_name] = c
         return
-        
 """
 Raise if a call is made on a copy. The original DM should be the only owner.
 """
@@ -157,14 +164,75 @@ class DataManager:
         self.setInfos()
         self.columnsSave = []
         self.owner = id(self)
+    def allowCopy(self):
+        self.owner = id(self)
+    def prefix(self,columns):
+        for c in columns:
+            self.columnManagers[c]._prefix(self.dataset)
     def _checkOrigin(self):
         if(not self.owner == id(self)):
             raise AccessExceptionError("Calls from a copy isn't allowed. Please use the 'real' manager.")
+            
+    def symbolicDecomposition(self,groupbyKeys,studyColumns):
+        # todo : verif studyCols
+        cols = []
+        fields = pd.Series([]).describe().index.values # fields in the describe fun
+        print("verifications...")
+        for col,data in self.dataTypes.items():
+            if(col in studyColumns):
+                assert(data._asdict()["type"].value in [dataType.CATEGORICAL.value,dataType.NUMERICAL.value,dataType.STRING.value])
+                assert(data._asdict()["nature"].value in [dataNature.CONTINOUS.value,dataNature.DISCRETE.value])
+                if(data._asdict()["nature"].value==dataNature.CONTINOUS.value):
+                    for f in fields :
+                        cols.append(col+"_"+str(f))
+                else:
+                    for el in self.dataset[col].unique():
+                        cols.append(col+"_"+str(el))
+        print("creating new dataframe...")
+        newDf = pd.DataFrame([],columns=cols)
+        new_groups = self.dataset.groupby(by=groupbyKeys)
+        keys_groups = list(new_groups.groups.keys())
+        groupsDone = 0
+        groupsTotal_norm = len(keys_groups)//100
+        print(len(keys_groups),"groups")
+        for key in keys_groups:
+            row = {}
+            if(len(groupbyKeys)==1):
+                key = tuple([key])
+            for i in range(len(key)):
+                row[groupbyKeys[i]] = key[i]
+            key = key[0]
+            group = self.dataset.iloc[new_groups.groups[key]]#.reset_index()  
+            for col_name in studyColumns:
+                col = group.pop(col_name)
+                if(self.dataTypes[col_name]._asdict()["nature"].value==dataNature.DISCRETE.value):
+                    val_counts = col.value_counts()
+                    val_counts/=val_counts.sum()
+                    for items in val_counts.iteritems():
+                        row[col_name+"_"+str(items[0])] = items[1]    
+                else :
+                    descr = col.describe()
+                    for desc_item in descr.items():
+                        row[col_name+"_"+str(desc_item[0])]=desc_item[1]
+            newDf = newDf.append(row,ignore_index=True)
+            groupsDone+=1
+            if( groupsDone%groupsTotal_norm==0 ):
+                print(groupsDone//groupsTotal_norm,"% done")      
+        print("loading dataset...")
+        for col,data in self.dataTypes.items():
+            if(data._asdict()["nature"].value==dataNature.DISCRETE.value and not col in groupbyKeys):
+                val = self.dataset[col].unique()
+                for v in val:
+                    newDf[col+"_"+str(v)] = newDf[col+"_"+str(v)].fillna(0)
+        self.dataset=newDf
+        print("refresh columns information...")
+        self.setInfos()             
+                
     """
-    Transform a column of string representing a year into a date. (00:00 pm, 1st of january are added.)
+    Transform a column of strings representing a year into a date. (00:00 am, 1st of january are added.)
     """
     def yearStringToDate(self,col):
-        _checkOrigin(self)
+        self._checkOrigin()
         self.columnManagers[col]._yearStringToDate(self.dataset)
         self.dataTypes[col] = DataInfo(dataType.DATE,dataNature.CONTINOUS)
     """
@@ -174,7 +242,7 @@ class DataManager:
     If the result isn't correct for dates, then ???? @TODO repair method for a column list
     """
     def typesSummary(self):
-        dico = {"float":[],'int64':[],"object":[],"timedelta":[],"datetimetz":[]}
+        dico = {"float":[],'int64':[],"object":[],"timedelta":[],"datetimetz":[],"datetime64":[],"bool":[]}
         for k in dico:
             dico[k] = self.dataset.select_dtypes(include=[k]).columns.values
         return dico,self.dataset.dtypes.value_counts()
@@ -209,13 +277,12 @@ class DataManager:
     """
     def delColumns(self,columns):
         self._checkOrigin()
+        self.dataset = self.dataset.drop(columns=columns)
         for col in columns:
             if(col in self.dataTypes):
                 self.dataTypes.pop(col)
             if(col in self.columnManagers):
-                self.columnManagers.pop(col)
-            if(col in self.dataset):
-                self.dataset.pop(col)
+                self.columnManagers.pop(col)                
     """
     Del all Nan containing at least one NaN
     """
@@ -247,6 +314,10 @@ class DataManager:
             dataInfo = DataInfo(dataType.NUMERICAL,dataNature.DISCRETE)
             self.columnManagers[column_name]=_ColumnManager(column_name,False,True)
             self.dataTypes[column_name] = dataInfo
+        for column_name in ty["bool"]:
+            dataInfo = DataInfo(dataType.CATEGORICAL,dataNature.DISCRETE)
+            self.columnManagers[column_name]=_ColumnManager(column_name,False,True)
+            self.dataTypes[column_name] = dataInfo            
         for column_name in ty["object"]: # STRING : CHECK IF INT OR FLOAT BY TRYING A CAST
             try:
                 copy = self.dataset[column_name].sample(frac=0.2,replace=False,random_state=1)
@@ -281,8 +352,7 @@ class DataManager:
     """
     
     """
-    def splitToNumerous(self,column_name):
-        # indiquer que l'on passe de categorique discret a numerique discret      
+    def splitToNumerous(self,column_name):    
         res = self.columnManagers[column_name]._splitToNumerous(self.dataset)
         self.dataTypes[column_name]._asdict()['type']=dataType.NUMERICAL
         return res
@@ -298,15 +368,50 @@ class DataManager:
     """
     
     """
-    def cut2Discretized(self,dico_nbins,overwrite=False):
-        for col in dico_nbins :
-            self.cut2Bins(col,dico_nbins[col],overwrite)
-    def cut2Bins(self,column_name,nb_bin,overwrite=False):
-        self.columnManagers[column_name]._cutIntoBins(nb_bin,self.isNormalized,self.dataset,overwrite)
+    def cut2Discretized(self,dico_nbins,groupByCols=[]):
+        self._checkOrigin()
+        for col in dico_nbins:
+            column_exists = col in self.dataTypes
+            assert(column_exists)
+        if(len(groupByCols)>0):
+            groups = self.dataset.groupby(by=groupByCols)
+            ind = groups.indices
+            g = 0
+            for name,group_idx in ind.items():
+                print(g,end=",")
+                g = g+1
+                for col in dico_nbins :
+                    #print("bining",col)
+                    self.dataset.loc[group_idx,col] = self.columnManagers[col]._cutIntoBins(dico_nbins[col],self.dataset.loc[group_idx,:])
+                    self.dataTypes[col]._asdict()['nature']=dataNature.DISCRETE
+        else:
+            for col in dico_nbins :
+                print("bining",col)
+                self.columnManagers[col]._cutIntoBins(dico_nbins[col],self.dataset)
+                self.dataTypes[col]._asdict()['nature']=dataNature.DISCRETE
+
+    def cut2Bins(self,column_name,nb_bin):
+        self._checkOrigin()
+        self.columnManagers[column_name]._cutIntoBins(nb_bin,self.dataset)
         # indiquer que l'on passe de numerique continue a numerique discret
         self.dataTypes[column_name]._asdict()['nature']=dataNature.DISCRETE
-        return   
-
+        return  
+    """
+    threshold distribution of one column
+    """
+    def tresholdDistribution(self,column_name,thresholds):
+        self._checkOrigin()
+        self.columnManagers[column_name]._thresholdDistr(thresholds,self.dataset)
+        self.dataTypes[column_name]._asdict()['nature']=dataNature.DISCRETE
+        return
+    """
+    threshold distribution of multiple columns
+    """
+    def tresholdMultiple(self,dico_thresholds):
+        for col,thr in dico_thresholds.items():
+            print("thresholding",col)
+            self.tresholdDistribution(col,thr)
+        return
     """ 
     Transforms datas into [0,1]-values 
     """
