@@ -124,7 +124,7 @@ for sensors in G :
     score = 0
     for s in ndf :
         ya = app[s].values
-        yt = app[s].values
+        yt = test[s].values
         clf = Ridge(alpha=0.005)
         clf.fit(Xa,ya)
         prediction = clf.predict(Xt)
